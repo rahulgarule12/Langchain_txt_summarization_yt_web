@@ -29,3 +29,15 @@ numexpr
 unstructured
 requests
 huggingface-hub
+streamlit
+python-dotenv
+validators
+langchain
+langchain-core
+langchain-community
+langchain-groq
+youtube-transcript-api
+unstructured
+requests
+beautifulsoup4
+lxml
