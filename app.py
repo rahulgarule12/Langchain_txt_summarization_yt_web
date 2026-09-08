@@ -1,4 +1,4 @@
-```python
+
 import validators
 import streamlit as st
 
@@ -738,4 +738,4 @@ if st.button(
         st.error(
             f"❌ Error: {e}"
         )
-```
+
