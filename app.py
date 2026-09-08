@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_groq import ChatGroq
-
+from youtube_transcript_api.proxies import GenericProxyConfig
 from langchain_community.document_loaders import (
     UnstructuredURLLoader,
 )
@@ -51,8 +51,10 @@ def get_secret(name):
 api_key = get_secret("GROQ_API_KEY")
 
 # Webshare proxy credentials
-webshare_username = get_secret("WEBSHARE_USERNAME")
-webshare_password = get_secret("WEBSHARE_PASSWORD")
+proxy_username = st.secrets["WEBSHARE_USERNAME"]
+proxy_password = st.secrets["WEBSHARE_PASSWORD"]
+proxy_host = st.secrets["WEBSHARE_HOST"]
+proxy_port = st.secrets["WEBSHARE_PORT"]
 
 
 # ============================================================
@@ -269,11 +271,11 @@ def get_youtube_transcript(video_id):
         if webshare_username and webshare_password:
 
             yt_api = YouTubeTranscriptApi(
-                proxy_config=WebshareProxyConfig(
-                    proxy_username=webshare_username,
-                    proxy_password=webshare_password,
+                    proxy_config=GenericProxyConfig(
+                    http_url=f"http://{proxy_username}:{proxy_password}@{proxy_host}:{proxy_port}",
+                    https_url=f"http://{proxy_username}:{proxy_password}@{proxy_host}:{proxy_port}"
+                    )
                 )
-            )
 
         else:
 
