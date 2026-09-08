@@ -1,7 +1,10 @@
-import streamlit as st
+```python
 import validators
+import streamlit as st
 
-from urllib.parse import urlparse, parse_qs, quote
+from urllib.parse import urlparse, parse_qs
+
+from dotenv import load_dotenv
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -12,7 +15,13 @@ from langchain_community.document_loaders import (
 )
 
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.proxies import GenericProxyConfig
+
+
+# ============================================================
+# LOAD ENVIRONMENT
+# ============================================================
+
+load_dotenv()
 
 
 # ============================================================
@@ -27,40 +36,23 @@ st.set_page_config(
 
 
 # ============================================================
-# READ STREAMLIT SECRETS
+# GROQ API KEY
 # ============================================================
 
+# For Streamlit Cloud use st.secrets
 api_key = st.secrets.get("GROQ_API_KEY")
 
-webshare_username = st.secrets.get("WEBSHARE_USERNAME")
-webshare_password = st.secrets.get("WEBSHARE_PASSWORD")
-webshare_host = st.secrets.get("WEBSHARE_HOST")
-webshare_port = st.secrets.get("WEBSHARE_PORT")
-
-
-# ============================================================
-# CHECK GROQ API KEY
-# ============================================================
-
 if not api_key:
-
     st.error(
-        "GROQ_API_KEY is missing from Streamlit Secrets."
+        "GROQ_API_KEY is missing."
+    )
+
+    st.info(
+        "Add GROQ_API_KEY in "
+        "Streamlit Cloud → Manage app → Settings → Secrets."
     )
 
     st.stop()
-
-
-# ============================================================
-# CHECK WEBSHARE CONFIG
-# ============================================================
-
-proxy_configured = all([
-    webshare_username,
-    webshare_password,
-    webshare_host,
-    webshare_port
-])
 
 
 # ============================================================
@@ -68,12 +60,12 @@ proxy_configured = all([
 # ============================================================
 
 st.title(
-    "📝 LangChain: YouTube & Website Summarizer"
+    "📝 YouTube & Website Summarizer"
 )
 
 st.write(
-    "Summarize YouTube videos or website content "
-    "in your preferred language."
+    "Summarize YouTube videos and websites "
+    "in multiple languages."
 )
 
 
@@ -85,7 +77,7 @@ st.sidebar.title("⚙️ Summary Settings")
 
 
 # ============================================================
-# LANGUAGE OPTIONS
+# SUMMARY LANGUAGES
 # ============================================================
 
 languages = {
@@ -118,30 +110,34 @@ selected_language = st.sidebar.selectbox(
 )
 
 
-st.sidebar.write(
-    f"Selected: **{selected_language}**"
+# ============================================================
+# SUMMARY LENGTH
+# ============================================================
+
+summary_length = st.sidebar.selectbox(
+    "📏 Summary Length",
+    options=[
+        "150 words",
+        "300 words",
+        "500 words"
+    ],
+    index=1
 )
 
 
 # ============================================================
-# PROXY STATUS
+# SOURCE OPTION
 # ============================================================
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🔐 YouTube Proxy")
 
+st.sidebar.subheader("🎥 YouTube")
 
-if proxy_configured:
-
-    st.sidebar.success(
-        "Webshare proxy configured"
-    )
-
-else:
-
-    st.sidebar.warning(
-        "Webshare proxy configuration missing"
-    )
+st.sidebar.info(
+    "On Streamlit Cloud free tier, YouTube may block "
+    "transcript requests because the app runs from a "
+    "cloud-provider IP."
+)
 
 
 # ============================================================
@@ -149,9 +145,27 @@ else:
 # ============================================================
 
 generic_url = st.text_input(
-    "Enter YouTube or Website URL",
+    "🔗 Enter YouTube or Website URL",
     placeholder="https://www.youtube.com/watch?v=..."
 )
+
+
+# ============================================================
+# MANUAL TRANSCRIPT FALLBACK
+# ============================================================
+
+with st.expander(
+    "📝 Paste YouTube transcript manually (free fallback)"
+):
+
+    manual_transcript = st.text_area(
+        "Paste transcript here",
+        height=200,
+        placeholder=(
+            "If YouTube blocks transcript retrieval, "
+            "paste the transcript here and the app will summarize it."
+        )
+    )
 
 
 # ============================================================
@@ -166,13 +180,14 @@ llm = ChatGroq(
 
 
 # ============================================================
-# PROMPT
+# SUMMARY PROMPT
 # ============================================================
 
 prompt_template = """
 You are an expert content summarizer.
 
-Summarize the following content in approximately 300 words.
+Summarize the following content in approximately
+{summary_length}.
 
 IMPORTANT INSTRUCTIONS:
 
@@ -182,11 +197,15 @@ IMPORTANT INSTRUCTIONS:
 4. Include the main ideas and key points.
 5. Remove unnecessary repetition.
 6. Do not invent information.
-7. Make the summary easy to understand.
-8. Use paragraphs and bullet points where appropriate.
+7. Do not add facts that are not present.
+8. Make the summary easy to understand.
+9. Use headings and bullet points when useful.
 
 Target language:
 {language}
+
+Summary length:
+{summary_length}
 
 Content:
 {text}
@@ -210,7 +229,7 @@ pipeline = (
 
 
 # ============================================================
-# YOUTUBE VIDEO ID
+# EXTRACT YOUTUBE VIDEO ID
 # ============================================================
 
 def extract_youtube_video_id(url):
@@ -227,7 +246,10 @@ def extract_youtube_video_id(url):
         hostname = hostname.lower()
 
 
-        # youtube.com/watch?v=...
+        # ----------------------------------------------------
+        # youtube.com/watch?v=VIDEO_ID
+        # ----------------------------------------------------
+
         if "youtube.com" in hostname:
 
             query_params = parse_qs(
@@ -237,11 +259,13 @@ def extract_youtube_video_id(url):
             video_id = query_params.get("v")
 
             if video_id:
-
                 return video_id[0]
 
 
-        # youtu.be/...
+        # ----------------------------------------------------
+        # youtu.be/VIDEO_ID
+        # ----------------------------------------------------
+
         if "youtu.be" in hostname:
 
             video_id = parsed_url.path.strip("/")
@@ -251,11 +275,14 @@ def extract_youtube_video_id(url):
                 return video_id.split("/")[0]
 
 
-        # youtube.com/embed/...
-        if "/embed/" in parsed_url.path:
+        # ----------------------------------------------------
+        # youtube.com/shorts/VIDEO_ID
+        # ----------------------------------------------------
+
+        if "/shorts/" in parsed_url.path:
 
             video_id = parsed_url.path.split(
-                "/embed/"
+                "/shorts/"
             )[1]
 
             if video_id:
@@ -263,11 +290,14 @@ def extract_youtube_video_id(url):
                 return video_id.split("/")[0]
 
 
-        # youtube.com/shorts/...
-        if "/shorts/" in parsed_url.path:
+        # ----------------------------------------------------
+        # youtube.com/embed/VIDEO_ID
+        # ----------------------------------------------------
+
+        if "/embed/" in parsed_url.path:
 
             video_id = parsed_url.path.split(
-                "/shorts/"
+                "/embed/"
             )[1]
 
             if video_id:
@@ -284,63 +314,22 @@ def extract_youtube_video_id(url):
 
 
 # ============================================================
-# CREATE YOUTUBE CLIENT
-# ============================================================
-
-def create_youtube_client():
-
-    if not proxy_configured:
-
-        raise Exception(
-            "Webshare proxy is not configured. "
-            "Add WEBSHARE_USERNAME, WEBSHARE_PASSWORD, "
-            "WEBSHARE_HOST and WEBSHARE_PORT to Streamlit Secrets."
-        )
-
-
-    # URL encode username/password
-    username = quote(
-        str(webshare_username),
-        safe=""
-    )
-
-    password = quote(
-        str(webshare_password),
-        safe=""
-    )
-
-
-    host = str(webshare_host).strip()
-    port = str(webshare_port).strip()
-
-
-    proxy_url = (
-        f"http://{username}:{password}"
-        f"@{host}:{port}"
-    )
-
-
-    return YouTubeTranscriptApi(
-        proxy_config=GenericProxyConfig(
-            http_url=proxy_url,
-            https_url=proxy_url
-        )
-    )
-
-
-# ============================================================
-# GET YOUTUBE TRANSCRIPT
+# GET YOUTUBE TRANSCRIPT - DIRECT
 # ============================================================
 
 def get_youtube_transcript(video_id):
 
     try:
 
-        yt_api = create_youtube_client()
+        # ----------------------------------------------------
+        # Create API client
+        # ----------------------------------------------------
+
+        yt_api = YouTubeTranscriptApi()
 
 
         # ----------------------------------------------------
-        # Get transcript list
+        # Get available transcripts
         # ----------------------------------------------------
 
         transcript_list = yt_api.list(
@@ -349,7 +338,7 @@ def get_youtube_transcript(video_id):
 
 
         # ----------------------------------------------------
-        # Preferred transcript languages
+        # Preferred languages
         # ----------------------------------------------------
 
         preferred_languages = [
@@ -371,7 +360,7 @@ def get_youtube_transcript(video_id):
 
 
         # ----------------------------------------------------
-        # Find transcript
+        # Try preferred languages
         # ----------------------------------------------------
 
         for language in preferred_languages:
@@ -385,7 +374,6 @@ def get_youtube_transcript(video_id):
                 )
 
                 if transcript:
-
                     break
 
             except Exception:
@@ -394,7 +382,8 @@ def get_youtube_transcript(video_id):
 
 
         # ----------------------------------------------------
-        # Fallback to first available transcript
+        # If no preferred language exists,
+        # use first available transcript
         # ----------------------------------------------------
 
         if transcript is None:
@@ -420,7 +409,7 @@ def get_youtube_transcript(video_id):
 
 
         # ----------------------------------------------------
-        # Convert to text
+        # Convert transcript to text
         # ----------------------------------------------------
 
         text_parts = []
@@ -455,10 +444,14 @@ def get_youtube_transcript(video_id):
         )
 
 
+        # ----------------------------------------------------
+        # Validate
+        # ----------------------------------------------------
+
         if not text.strip():
 
             raise Exception(
-                "Transcript is empty."
+                "Transcript was found but contains no text."
             )
 
 
@@ -467,38 +460,8 @@ def get_youtube_transcript(video_id):
 
     except Exception as e:
 
-        error_message = str(e)
-
-
-        if (
-            "407" in error_message
-            or
-            "Proxy Authentication Required"
-            in error_message
-        ):
-
-            raise Exception(
-                "Webshare authentication failed (407). "
-                "Please verify the proxy username, password, "
-                "host and port in Streamlit Secrets."
-            )
-
-
-        if (
-            "IpBlocked" in error_message
-            or
-            "RequestBlocked" in error_message
-        ):
-
-            raise Exception(
-                "YouTube blocked the proxy IP. "
-                "Try another Webshare proxy."
-            )
-
-
         raise Exception(
-            f"Could not retrieve YouTube transcript: "
-            f"{error_message}"
+            str(e)
         )
 
 
@@ -530,7 +493,7 @@ def get_website_content(url):
         if not docs:
 
             raise Exception(
-                "No content could be extracted."
+                "No content could be extracted from this website."
             )
 
 
@@ -558,7 +521,7 @@ def get_website_content(url):
 
 
 # ============================================================
-# SUMMARIZE
+# MAIN BUTTON
 # ============================================================
 
 if st.button(
@@ -566,39 +529,61 @@ if st.button(
     type="primary"
 ):
 
-    # --------------------------------------------------------
-    # Validate URL
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE INPUT
+    # ========================================================
 
-    if not generic_url:
+    if not generic_url and not manual_transcript:
 
         st.warning(
-            "Please enter a YouTube or Website URL."
+            "Please enter a URL or paste a transcript."
         )
 
         st.stop()
 
 
-    if not validators.url(
-        generic_url
-    ):
+    # ========================================================
+    # CONTENT VARIABLE
+    # ========================================================
 
-        st.error(
-            "Please enter a valid URL."
-        )
-
-        st.stop()
+    text = ""
 
 
     try:
 
         # ====================================================
-        # EXTRACT CONTENT
+        # MANUAL TRANSCRIPT HAS PRIORITY
         # ====================================================
 
-        with st.spinner(
-            "⏳ Extracting content..."
-        ):
+        if manual_transcript.strip():
+
+            st.info(
+                "📝 Using manually provided transcript."
+            )
+
+            text = manual_transcript.strip()
+
+
+        # ====================================================
+        # URL PROCESSING
+        # ====================================================
+
+        elif generic_url:
+
+            # ------------------------------------------------
+            # Validate URL
+            # ------------------------------------------------
+
+            if not validators.url(
+                generic_url
+            ):
+
+                st.error(
+                    "Please enter a valid URL."
+                )
+
+                st.stop()
+
 
             # ------------------------------------------------
             # YouTube
@@ -631,9 +616,43 @@ if st.button(
                     st.stop()
 
 
-                text = get_youtube_transcript(
-                    video_id
-                )
+                # ------------------------------------------------
+                # Try direct transcript
+                # ------------------------------------------------
+
+                with st.spinner(
+                    "⏳ Trying to retrieve YouTube transcript..."
+                ):
+
+                    try:
+
+                        text = get_youtube_transcript(
+                            video_id
+                        )
+
+                    except Exception as youtube_error:
+
+                        st.error(
+                            "❌ YouTube transcript could not "
+                            "be retrieved."
+                        )
+
+                        st.warning(
+                            "Streamlit Cloud free tier may be "
+                            "blocked by YouTube because the app "
+                            "runs from a cloud-provider IP."
+                        )
+
+                        st.info(
+                            "Please use the 'Paste YouTube "
+                            "transcript manually' box above."
+                        )
+
+                        st.caption(
+                            f"Technical error: {youtube_error}"
+                        )
+
+                        st.stop()
 
 
             # ------------------------------------------------
@@ -647,9 +666,13 @@ if st.button(
                 )
 
 
-                text = get_website_content(
-                    generic_url
-                )
+                with st.spinner(
+                    "⏳ Extracting website content..."
+                ):
+
+                    text = get_website_content(
+                        generic_url
+                    )
 
 
         # ====================================================
@@ -659,14 +682,14 @@ if st.button(
         if not text.strip():
 
             st.error(
-                "Could not extract content."
+                "No content was extracted."
             )
 
             st.stop()
 
 
         # ====================================================
-        # EXTRACTED CONTENT
+        # SHOW EXTRACTED CONTENT
         # ====================================================
 
         with st.expander(
@@ -679,7 +702,7 @@ if st.button(
 
 
         # ====================================================
-        # SUMMARIZE
+        # GENERATE SUMMARY
         # ====================================================
 
         with st.spinner(
@@ -691,13 +714,14 @@ if st.button(
                     "text": text,
                     "language": languages[
                         selected_language
-                    ]
+                    ],
+                    "summary_length": summary_length
                 }
             )
 
 
         # ====================================================
-        # RESULT
+        # DISPLAY RESULT
         # ====================================================
 
         st.subheader(
@@ -714,3 +738,4 @@ if st.button(
         st.error(
             f"❌ Error: {e}"
         )
+```
