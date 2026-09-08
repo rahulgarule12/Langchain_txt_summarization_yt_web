@@ -1,11 +1,7 @@
-
-import os
-from urllib.parse import urlparse, parse_qs, quote
-
-import validators
 import streamlit as st
+import validators
 
-from dotenv import load_dotenv
+from urllib.parse import urlparse, parse_qs, quote
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -20,25 +16,6 @@ from youtube_transcript_api.proxies import GenericProxyConfig
 
 
 # ============================================================
-# LOAD .ENV
-# ============================================================
-
-load_dotenv()
-
-
-# ============================================================
-# READ ENVIRONMENT VARIABLES
-# ============================================================
-
-api_key = os.getenv("GROQ_API_KEY")
-
-webshare_username = os.getenv("WEBSHARE_USERNAME")
-webshare_password = os.getenv("WEBSHARE_PASSWORD")
-webshare_host = os.getenv("WEBSHARE_HOST")
-webshare_port = os.getenv("WEBSHARE_PORT")
-
-
-# ============================================================
 # STREAMLIT CONFIG
 # ============================================================
 
@@ -50,22 +27,44 @@ st.set_page_config(
 
 
 # ============================================================
+# READ STREAMLIT SECRETS
+# ============================================================
+
+api_key = st.secrets.get("GROQ_API_KEY")
+
+webshare_username = st.secrets.get("WEBSHARE_USERNAME")
+webshare_password = st.secrets.get("WEBSHARE_PASSWORD")
+webshare_host = st.secrets.get("WEBSHARE_HOST")
+webshare_port = st.secrets.get("WEBSHARE_PORT")
+
+
+# ============================================================
 # CHECK GROQ API KEY
 # ============================================================
 
 if not api_key:
 
-    st.error("GROQ_API_KEY not found.")
-
-    st.info(
-        "Please add GROQ_API_KEY to your .env file."
+    st.error(
+        "GROQ_API_KEY is missing from Streamlit Secrets."
     )
 
     st.stop()
 
 
 # ============================================================
-# PAGE TITLE
+# CHECK WEBSHARE CONFIG
+# ============================================================
+
+proxy_configured = all([
+    webshare_username,
+    webshare_password,
+    webshare_host,
+    webshare_port
+])
+
+
+# ============================================================
+# TITLE
 # ============================================================
 
 st.title(
@@ -125,20 +124,11 @@ st.sidebar.write(
 
 
 # ============================================================
-# WEBSHARE STATUS
+# PROXY STATUS
 # ============================================================
 
 st.sidebar.markdown("---")
-
 st.sidebar.subheader("🔐 YouTube Proxy")
-
-
-proxy_configured = all([
-    webshare_username,
-    webshare_password,
-    webshare_host,
-    webshare_port
-])
 
 
 if proxy_configured:
@@ -150,7 +140,7 @@ if proxy_configured:
 else:
 
     st.sidebar.warning(
-        "Webshare proxy is not configured"
+        "Webshare proxy configuration missing"
     )
 
 
@@ -220,7 +210,7 @@ pipeline = (
 
 
 # ============================================================
-# EXTRACT YOUTUBE VIDEO ID
+# YOUTUBE VIDEO ID
 # ============================================================
 
 def extract_youtube_video_id(url):
@@ -236,10 +226,8 @@ def extract_youtube_video_id(url):
 
         hostname = hostname.lower()
 
-        # ----------------------------------------------------
-        # youtube.com/watch?v=VIDEO_ID
-        # ----------------------------------------------------
 
+        # youtube.com/watch?v=...
         if "youtube.com" in hostname:
 
             query_params = parse_qs(
@@ -253,10 +241,7 @@ def extract_youtube_video_id(url):
                 return video_id[0]
 
 
-        # ----------------------------------------------------
-        # youtu.be/VIDEO_ID
-        # ----------------------------------------------------
-
+        # youtu.be/...
         if "youtu.be" in hostname:
 
             video_id = parsed_url.path.strip("/")
@@ -266,10 +251,7 @@ def extract_youtube_video_id(url):
                 return video_id.split("/")[0]
 
 
-        # ----------------------------------------------------
-        # youtube.com/embed/VIDEO_ID
-        # ----------------------------------------------------
-
+        # youtube.com/embed/...
         if "/embed/" in parsed_url.path:
 
             video_id = parsed_url.path.split(
@@ -281,10 +263,7 @@ def extract_youtube_video_id(url):
                 return video_id.split("/")[0]
 
 
-        # ----------------------------------------------------
-        # youtube.com/shorts/VIDEO_ID
-        # ----------------------------------------------------
-
+        # youtube.com/shorts/...
         if "/shorts/" in parsed_url.path:
 
             video_id = parsed_url.path.split(
@@ -310,42 +289,36 @@ def extract_youtube_video_id(url):
 
 def create_youtube_client():
 
-    # --------------------------------------------------------
-    # Check proxy configuration
-    # --------------------------------------------------------
-
     if not proxy_configured:
 
-        return YouTubeTranscriptApi()
+        raise Exception(
+            "Webshare proxy is not configured. "
+            "Add WEBSHARE_USERNAME, WEBSHARE_PASSWORD, "
+            "WEBSHARE_HOST and WEBSHARE_PORT to Streamlit Secrets."
+        )
 
 
-    # --------------------------------------------------------
-    # URL-encode credentials
-    #
-    # This protects the proxy URL if username/password contains
-    # special characters such as @, :, /, etc.
-    # --------------------------------------------------------
-
+    # URL encode username/password
     username = quote(
-        webshare_username,
+        str(webshare_username),
         safe=""
     )
 
     password = quote(
-        webshare_password,
+        str(webshare_password),
         safe=""
     )
 
 
+    host = str(webshare_host).strip()
+    port = str(webshare_port).strip()
+
+
     proxy_url = (
         f"http://{username}:{password}"
-        f"@{webshare_host}:{webshare_port}"
+        f"@{host}:{port}"
     )
 
-
-    # --------------------------------------------------------
-    # Generic proxy configuration
-    # --------------------------------------------------------
 
     return YouTubeTranscriptApi(
         proxy_config=GenericProxyConfig(
@@ -363,29 +336,11 @@ def get_youtube_transcript(video_id):
 
     try:
 
-        # ----------------------------------------------------
-        # Create client
-        # ----------------------------------------------------
-
-        if proxy_configured:
-
-            st.info(
-                "🔐 Connecting to YouTube through Webshare..."
-            )
-
-        else:
-
-            st.warning(
-                "⚠️ Webshare proxy is not configured. "
-                "Trying direct YouTube connection."
-            )
-
-
         yt_api = create_youtube_client()
 
 
         # ----------------------------------------------------
-        # Get available transcripts
+        # Get transcript list
         # ----------------------------------------------------
 
         transcript_list = yt_api.list(
@@ -416,7 +371,7 @@ def get_youtube_transcript(video_id):
 
 
         # ----------------------------------------------------
-        # Find preferred transcript
+        # Find transcript
         # ----------------------------------------------------
 
         for language in preferred_languages:
@@ -439,7 +394,7 @@ def get_youtube_transcript(video_id):
 
 
         # ----------------------------------------------------
-        # Fallback to any available transcript
+        # Fallback to first available transcript
         # ----------------------------------------------------
 
         if transcript is None:
@@ -465,7 +420,7 @@ def get_youtube_transcript(video_id):
 
 
         # ----------------------------------------------------
-        # Convert transcript to text
+        # Convert to text
         # ----------------------------------------------------
 
         text_parts = []
@@ -500,14 +455,10 @@ def get_youtube_transcript(video_id):
         )
 
 
-        # ----------------------------------------------------
-        # Validate transcript
-        # ----------------------------------------------------
-
         if not text.strip():
 
             raise Exception(
-                "Transcript was found but contains no text."
+                "Transcript is empty."
             )
 
 
@@ -519,10 +470,6 @@ def get_youtube_transcript(video_id):
         error_message = str(e)
 
 
-        # ----------------------------------------------------
-        # Proxy authentication error
-        # ----------------------------------------------------
-
         if (
             "407" in error_message
             or
@@ -531,58 +478,26 @@ def get_youtube_transcript(video_id):
         ):
 
             raise Exception(
-                "Webshare proxy authentication failed (407).\n\n"
-                "Please verify:\n"
-                "• Webshare proxy username\n"
-                "• Webshare proxy password\n"
-                "• Proxy address/IP\n"
-                "• Proxy port\n\n"
-                "Make sure the credentials are the proxy "
-                "credentials shown by Webshare."
+                "Webshare authentication failed (407). "
+                "Please verify the proxy username, password, "
+                "host and port in Streamlit Secrets."
             )
 
-
-        # ----------------------------------------------------
-        # YouTube IP block
-        # ----------------------------------------------------
 
         if (
             "IpBlocked" in error_message
             or
             "RequestBlocked" in error_message
-            or
-            "YouTube is blocking" in error_message
         ):
 
             raise Exception(
-                "YouTube is blocking the proxy IP.\n\n"
-                "Try a different Webshare proxy, preferably "
-                "a rotating residential proxy."
+                "YouTube blocked the proxy IP. "
+                "Try another Webshare proxy."
             )
 
-
-        # ----------------------------------------------------
-        # Transcript unavailable
-        # ----------------------------------------------------
-
-        if (
-            "No transcripts were found" in error_message
-            or
-            "No transcript" in error_message
-        ):
-
-            raise Exception(
-                "This YouTube video does not have a usable "
-                "transcript."
-            )
-
-
-        # ----------------------------------------------------
-        # Other error
-        # ----------------------------------------------------
 
         raise Exception(
-            f"Could not retrieve YouTube transcript:\n"
+            f"Could not retrieve YouTube transcript: "
             f"{error_message}"
         )
 
@@ -615,7 +530,7 @@ def get_website_content(url):
         if not docs:
 
             raise Exception(
-                "No content could be extracted from this website."
+                "No content could be extracted."
             )
 
 
@@ -643,7 +558,7 @@ def get_website_content(url):
 
 
 # ============================================================
-# SUMMARIZE BUTTON
+# SUMMARIZE
 # ============================================================
 
 if st.button(
@@ -674,10 +589,6 @@ if st.button(
 
         st.stop()
 
-
-    # --------------------------------------------------------
-    # Process
-    # --------------------------------------------------------
 
     try:
 
@@ -748,14 +659,14 @@ if st.button(
         if not text.strip():
 
             st.error(
-                "Could not extract any content."
+                "Could not extract content."
             )
 
             st.stop()
 
 
         # ====================================================
-        # SHOW EXTRACTED CONTENT
+        # EXTRACTED CONTENT
         # ====================================================
 
         with st.expander(
@@ -768,7 +679,7 @@ if st.button(
 
 
         # ====================================================
-        # GENERATE SUMMARY
+        # SUMMARIZE
         # ====================================================
 
         with st.spinner(
@@ -786,13 +697,12 @@ if st.button(
 
 
         # ====================================================
-        # DISPLAY SUMMARY
+        # RESULT
         # ====================================================
 
         st.subheader(
             f"📌 Summary ({selected_language})"
         )
-
 
         st.success(
             summary
