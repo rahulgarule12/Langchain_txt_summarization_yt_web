@@ -1,4 +1,4 @@
-```python
+
 import os
 from urllib.parse import urlparse, parse_qs, quote
 
@@ -804,4 +804,3 @@ if st.button(
         st.error(
             f"❌ Error: {e}"
         )
-```
